@@ -257,11 +257,18 @@ fi
 # -----------------------------------------------------------------------------
 # Task 4: Submit Flink streaming job
 # -----------------------------------------------------------------------------
-echo "==> Submitting Flink streaming job (Kafka -> Iceberg)..."
+echo "==> Checking for existing Flink jobs..."
 
-docker compose exec -T flink-jobmanager bash /opt/flink/submit-sql-job.sh
+running_jobs=$(curl -s http://localhost:8081/jobs 2>/dev/null \
+  | python3 -c "import sys,json; jobs=json.load(sys.stdin).get('jobs',[]); print(sum(1 for j in jobs if j['status']=='RUNNING'))" 2>/dev/null || echo "0")
 
-echo "    Flink streaming job submitted."
+if [ "$running_jobs" -gt 0 ]; then
+  echo "    Found ${running_jobs} running Flink job(s), skipping submission."
+else
+  echo "==> Submitting Flink streaming job (Kafka -> Iceberg)..."
+  docker compose exec -T flink-jobmanager bash /opt/flink/submit-sql-job.sh
+  echo "    Flink streaming job submitted."
+fi
 
 # -----------------------------------------------------------------------------
 # Task 5: Verify Trino connectivity
