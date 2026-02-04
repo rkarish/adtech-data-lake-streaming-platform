@@ -361,9 +361,33 @@ Access the Trino Web UI at [http://localhost:8080](http://localhost:8080) (no cr
 docker exec trino trino --catalog iceberg --schema db
 ```
 
+### MinIO CLI (`mc`)
+
+Install the MinIO Client to browse buckets and Iceberg Parquet files from your host machine:
+
+```bash
+# Install (macOS)
+brew install minio/stable/mc
+
+# Set up an alias for the local MinIO instance
+mc alias set local http://localhost:9000 admin password
+
+# List buckets
+mc ls local
+
+# List the warehouse bucket (Iceberg data root)
+mc ls local/warehouse/
+
+# Recursively list all Parquet and metadata files
+mc ls --recursive local/warehouse/
+
+# List files for a specific table
+mc ls --recursive local/warehouse/db/bid_requests/
+```
+
 ### MinIO Console
 
-Access the MinIO web console at [http://localhost:9001](http://localhost:9001) with credentials `admin` / `password`.
+Access the MinIO web console at [http://localhost:9001](http://localhost:9001) with credentials `admin` / `password`. From the console you can browse the `warehouse` bucket, navigate into `db/<table_name>/` directories, and inspect or download individual Parquet and Iceberg metadata files.
 
 ### Iceberg REST Catalog
 
