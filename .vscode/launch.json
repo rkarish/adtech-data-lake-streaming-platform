@@ -1,0 +1,18 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Mock Data Generator",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "src.generator",
+      "cwd": "${workspaceFolder}/mock-data-gen",
+      "env": {
+        "KAFKA_BOOTSTRAP_SERVERS": "localhost:29092",
+        "EVENTS_PER_SECOND": "10",
+        "TOPIC_BID_REQUESTS": "bid_requests"
+      },
+      "console": "integratedTerminal"
+    }
+  ]
+}

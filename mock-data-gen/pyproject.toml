@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mock-data-gen"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "kafka-python-ng>=2.0.2",
+    "faker>=22.0.0",
+]
+
+[project.scripts]
+mock-data-gen = "src.generator:main"
