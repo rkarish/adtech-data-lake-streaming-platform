@@ -16,8 +16,12 @@ Mock Data Gen  --->  Kafka (KRaft)
               |                     |
         Iceberg REST            MinIO (S3)
          Catalog                    |
-                              Iceberg Tables
-                             (Parquet files)
+              |              Iceberg Tables
+              |             (Parquet files)
+              |                     |
+              +----------+----------+
+                         |
+                   Trino (Query)
 ```
 
 **Services:**
@@ -30,6 +34,7 @@ Mock Data Gen  --->  Kafka (KRaft)
 | `mock-data-gen` | Custom (Python 3.12) | -- |
 | `flink-jobmanager` | Custom (Flink 1.20 + Iceberg) | 8081 (Web UI) |
 | `flink-taskmanager` | Custom (Flink 1.20 + Iceberg) | -- |
+| `trino` | `trinodb/trino:467` | 8080 (Web UI) |
 
 ## Prerequisites
 
@@ -53,7 +58,7 @@ docker compose ps
 
 ### 2. Run the setup script
 
-Creates the Kafka topic, MinIO bucket, Iceberg namespace + table, and submits the Flink streaming job:
+Creates the Kafka topic, MinIO bucket, Iceberg namespace + table, submits the Flink streaming job, and verifies Trino connectivity:
 
 ```bash
 bash scripts/setup.sh
@@ -187,7 +192,32 @@ ORDER BY cnt DESC;
 
 Type `QUIT;` to exit the SQL client.
 
-### 6. Stop
+### 6. Query with Trino
+
+Trino provides a standard SQL interface to the Iceberg tables. Run an ad-hoc query:
+
+```bash
+docker exec trino trino --catalog iceberg --schema db \
+  --execute "SELECT device_geo_country, COUNT(*) AS cnt FROM bid_requests GROUP BY device_geo_country ORDER BY cnt DESC LIMIT 5"
+```
+
+Run the full set of sample analytical queries:
+
+```bash
+bash scripts/query-examples.sh
+```
+
+The Trino Web UI is available at [http://localhost:8080](http://localhost:8080) (no credentials required).
+
+### 7. Table Maintenance
+
+Run Iceberg table maintenance (compaction, snapshot expiry, orphan cleanup) via Trino:
+
+```bash
+bash scripts/maintenance.sh
+```
+
+### 8. Stop
 
 ```bash
 docker compose down
@@ -201,7 +231,7 @@ You can run the mock data generator outside Docker while keeping Kafka, Flink, a
 
 ```bash
 docker compose build flink-jobmanager flink-taskmanager
-docker compose up kafka minio iceberg-rest flink-jobmanager flink-taskmanager -d
+docker compose up kafka minio iceberg-rest trino flink-jobmanager flink-taskmanager -d
 ```
 
 Wait for all services to become healthy:
@@ -212,7 +242,7 @@ docker compose ps
 
 ### 2. Run the setup script
 
-Creates the Kafka topic, MinIO bucket, Iceberg namespace + table, and submits the Flink streaming job:
+Creates the Kafka topic, MinIO bucket, Iceberg namespace + table, submits the Flink streaming job, and verifies Trino connectivity:
 
 ```bash
 bash scripts/setup.sh
@@ -272,6 +302,14 @@ docker compose exec minio mc ls --recursive local/warehouse/db/bid_requests/
 
 Access the Flink dashboard at [http://localhost:8081](http://localhost:8081) to monitor running jobs, checkpoints, and task metrics.
 
+### Trino
+
+Access the Trino Web UI at [http://localhost:8080](http://localhost:8080) (no credentials required). Run queries via CLI:
+
+```bash
+docker exec trino trino --catalog iceberg --schema db
+```
+
 ### MinIO Console
 
 Access the MinIO web console at [http://localhost:9001](http://localhost:9001) with credentials `admin` / `password`.
@@ -305,7 +343,12 @@ streaming-data-lake/
       sql/
         create_tables.sql          # Flink SQL DDL (catalogs + source tables)
         insert_jobs.sql            # Flink SQL DML (streaming insert)
+  trino/
+    catalog/
+      iceberg.properties           # Iceberg connector config for Trino
   scripts/
-    setup.sh                       # Initialize topics, bucket, tables, Flink job
+    setup.sh                       # Initialize topics, bucket, tables, Flink job, verify Trino
     run-local.sh                   # Run generator in local .venv
+    query-examples.sh              # Sample analytical queries via Trino
+    maintenance.sh                 # Iceberg table maintenance (compaction, expiry, cleanup)
 ```

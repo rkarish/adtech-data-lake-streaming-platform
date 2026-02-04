@@ -444,7 +444,32 @@ streaming-data-lake/
 - Sample analytical queries (fill rate, CPM by geo, win rate trends)
 - Table maintenance jobs
 
-### Phase 4: Cloud Readiness
+### Phase 4: Data Exploration & Visualization
+- CloudBeaver (web-based SQL IDE) connected to Trino for interactive querying of Iceberg tables
+- Apache Superset connected to Trino for dashboards and data visualization
+- Docker Compose services for both tools with pre-configured Trino datasource connections
+
+#### CloudBeaver
+- Image: `dbeaver/cloudbeaver:latest`
+- Connects to Trino via the JDBC driver (Trino JDBC is bundled in CloudBeaver)
+- Provides a browser-based SQL editor at `http://localhost:8978`
+- Allows ad-hoc exploration of the `iceberg.db` schema without CLI access
+
+#### Apache Superset
+- Image: `apache/superset:latest`
+- Connects to Trino via the `trino` Python driver (SQLAlchemy URI: `trino://trino@trino:8080/iceberg/db`)
+- Provides dashboards and charts at `http://localhost:8088`
+- Pre-configured with a simple visualization (e.g., bid requests by country, bid floor distribution)
+- Bootstrap script to create the Trino datasource and sample charts on first run
+
+#### New Docker Compose Services
+
+| Service | Image | Port | Purpose |
+|---|---|---|---|
+| `cloudbeaver` | `dbeaver/cloudbeaver` | 8978 | Web SQL IDE for Trino |
+| `superset` | `apache/superset` | 8088 | Dashboards & visualization |
+
+### Phase 5: Cloud Readiness
 - Parameterize storage and catalog configs for AWS/GCP
 - Document deployment steps for each cloud
 - CI/CD pipeline for streaming job deployment

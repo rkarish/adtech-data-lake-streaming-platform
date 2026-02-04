@@ -9,6 +9,7 @@ set -euo pipefail
 #   2. MinIO bucket (warehouse)
 #   3. Iceberg namespace and table (db.bid_requests)
 #   4. Flink streaming job (Kafka -> Iceberg)
+#   5. Trino connectivity verification
 # =============================================================================
 
 ICEBERG_REST_URL="http://localhost:8181"
@@ -130,6 +131,29 @@ docker compose exec -T flink-jobmanager bash /opt/flink/submit-sql-job.sh
 echo "    Flink streaming job submitted."
 
 # -----------------------------------------------------------------------------
+# Task 5: Verify Trino connectivity
+# -----------------------------------------------------------------------------
+echo "==> Verifying Trino can query the Iceberg catalog..."
+
+max_attempts=12
+attempt=0
+while [ $attempt -lt $max_attempts ]; do
+  attempt=$((attempt + 1))
+  tables=$(docker exec trino trino --catalog iceberg --schema db --execute "SHOW TABLES" 2>/dev/null || true)
+  if echo "$tables" | grep -q "bid_requests"; then
+    echo "    Trino verified: 'bid_requests' table is visible."
+    break
+  fi
+  if [ $attempt -eq $max_attempts ]; then
+    echo "    WARNING: Trino could not find 'bid_requests' after ${max_attempts} attempts."
+    echo "    Check that the Trino service is healthy: docker compose ps trino"
+    break
+  fi
+  echo "    Waiting for Trino... (attempt ${attempt}/${max_attempts})"
+  sleep 5
+done
+
+# -----------------------------------------------------------------------------
 # Done
 # -----------------------------------------------------------------------------
 echo ""
@@ -138,3 +162,4 @@ echo "    - Kafka topic:    bid-requests (3 partitions)"
 echo "    - MinIO bucket:   s3://warehouse"
 echo "    - Iceberg table:  db.bid_requests (21 fields, partitioned by day(event_timestamp) + device_geo_country)"
 echo "    - Flink job:      Streaming Kafka -> Iceberg (check http://localhost:8081)"
+echo "    - Trino:          Query engine ready (http://localhost:8080)"

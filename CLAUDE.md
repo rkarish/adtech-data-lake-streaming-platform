@@ -12,5 +12,4 @@ Always use the `voltagent-data-ai:data-engineer` subagent for all implementation
 
 ## Coding standards
 
-1. Don't use blank spaces in JSON data inside of shell scripts, new lines and indentation is fine.
-2. Don't use excessive whitespace in .sql files, new lines and indentation is fine.
+1. Do not use excessive whitespace in JSON data inside of shell scripts or in .sql files, new lines and indentation is fine.
