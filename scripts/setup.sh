@@ -10,6 +10,8 @@ set -euo pipefail
 #   3. Iceberg namespace and table (db.bid_requests)
 #   4. Flink streaming job (Kafka -> Iceberg)
 #   5. Trino connectivity verification
+#   6. CloudBeaver readiness check
+#   7. Superset readiness check and dashboard setup
 # =============================================================================
 
 ICEBERG_REST_URL="http://localhost:8181"
@@ -154,6 +156,54 @@ while [ $attempt -lt $max_attempts ]; do
 done
 
 # -----------------------------------------------------------------------------
+# Task 6: Wait for CloudBeaver
+# -----------------------------------------------------------------------------
+echo "==> Waiting for CloudBeaver to become ready..."
+
+max_attempts=30
+attempt=0
+while [ $attempt -lt $max_attempts ]; do
+  attempt=$((attempt + 1))
+  if curl -sf http://localhost:8978 > /dev/null 2>&1; then
+    echo "    CloudBeaver is ready."
+    break
+  fi
+  if [ $attempt -eq $max_attempts ]; then
+    echo "    WARNING: CloudBeaver not ready after ${max_attempts} attempts."
+    echo "    Check: docker compose ps cloudbeaver"
+    break
+  fi
+  echo "    Waiting for CloudBeaver... (attempt ${attempt}/${max_attempts})"
+  sleep 5
+done
+
+# -----------------------------------------------------------------------------
+# Task 7: Wait for Superset and set up dashboards
+# -----------------------------------------------------------------------------
+echo "==> Waiting for Superset to become ready..."
+
+max_attempts=60
+attempt=0
+while [ $attempt -lt $max_attempts ]; do
+  attempt=$((attempt + 1))
+  if curl -sf http://localhost:8088/health > /dev/null 2>&1; then
+    echo "    Superset is ready."
+    break
+  fi
+  if [ $attempt -eq $max_attempts ]; then
+    echo "    WARNING: Superset not ready after ${max_attempts} attempts."
+    echo "    Check: docker compose ps superset"
+    break
+  fi
+  echo "    Waiting for Superset... (attempt ${attempt}/${max_attempts})"
+  sleep 5
+done
+
+echo "==> Setting up Superset dashboards..."
+docker compose exec -T superset python /app/setup-dashboards.py
+echo "    Superset dashboards configured."
+
+# -----------------------------------------------------------------------------
 # Done
 # -----------------------------------------------------------------------------
 echo ""
@@ -163,3 +213,5 @@ echo "    - MinIO bucket:   s3://warehouse"
 echo "    - Iceberg table:  db.bid_requests (21 fields, partitioned by day(event_timestamp) + device_geo_country)"
 echo "    - Flink job:      Streaming Kafka -> Iceberg (check http://localhost:8081)"
 echo "    - Trino:          Query engine ready (http://localhost:8080)"
+echo "    - CloudBeaver:    Web SQL IDE ready (http://localhost:8978)"
+echo "    - Superset:       Dashboards ready (http://localhost:8088)"

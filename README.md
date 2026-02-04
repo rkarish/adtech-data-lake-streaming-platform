@@ -22,6 +22,11 @@ Mock Data Gen  --->  Kafka (KRaft)
               +----------+----------+
                          |
                    Trino (Query)
+                         |
+              +----------+----------+
+              |                     |
+        CloudBeaver           Superset
+       (Web SQL IDE)         (Dashboards)
 ```
 
 **Services:**
@@ -35,6 +40,9 @@ Mock Data Gen  --->  Kafka (KRaft)
 | `flink-jobmanager` | Custom (Flink 1.20 + Iceberg) | 8081 (Web UI) |
 | `flink-taskmanager` | Custom (Flink 1.20 + Iceberg) | -- |
 | `trino` | `trinodb/trino:467` | 8080 (Web UI) |
+| `cloudbeaver` | `dbeaver/cloudbeaver:latest` | 8978 (Web UI) |
+| `superset` | Custom (apache/superset + trino driver) | 8088 (Web UI) |
+| `superset-postgres` | `postgres:16-alpine` | internal only |
 
 ## Prerequisites
 
@@ -48,6 +56,12 @@ Mock Data Gen  --->  Kafka (KRaft)
 
 ```bash
 docker compose up --build -d
+```
+
+This starts the infrastructure services (Kafka, MinIO, Iceberg, Flink, Trino, CloudBeaver, Superset) but **not** the mock data generator. To also start the generator (continuous event stream):
+
+```bash
+docker compose --profile generator up --build -d
 ```
 
 Wait for all services to become healthy:
@@ -217,7 +231,28 @@ Run Iceberg table maintenance (compaction, snapshot expiry, orphan cleanup) via 
 bash scripts/maintenance.sh
 ```
 
-### 8. Stop
+### 8. CloudBeaver (Web SQL IDE)
+
+Open [http://localhost:8978](http://localhost:8978). On the first launch you will need to complete the setup wizard:
+
+1. Set an admin password (must meet complexity requirements, e.g. `Password123!`)
+2. Finish the wizard
+
+Once configured, click the CloudBeaver logo in the top-left corner to reach the main database UI. The pre-configured "Trino Iceberg" connection appears in the sidebar. Expand it to browse the `iceberg > db > bid_requests` table and run SQL queries.
+
+The workspace is persisted in a Docker volume (`cloudbeaver-workspace`), so subsequent restarts will skip the wizard.
+
+### 9. Superset (Charts & SQL Lab)
+
+Open [http://localhost:8088](http://localhost:8088) and log in with `admin` / `password`. The setup script creates:
+
+- A Trino database connection
+- A `bid_requests` dataset
+- A "Bid Requests by Country" pie chart (visible under Charts)
+
+You can also use SQL Lab to run ad-hoc queries against Trino.
+
+### 10. Stop
 
 ```bash
 docker compose down
@@ -322,6 +357,14 @@ The catalog API is available at [http://localhost:8181](http://localhost:8181). 
 curl -s http://localhost:8181/v1/namespaces/db/tables | python3 -m json.tool
 ```
 
+### CloudBeaver
+
+Access the CloudBeaver web SQL IDE at [http://localhost:8978](http://localhost:8978) with credentials `admin` / `password`. A Trino connection is pre-configured and available immediately.
+
+### Superset
+
+Access Superset at [http://localhost:8088](http://localhost:8088) with credentials `admin` / `password`. The Trino connection, dataset, and a sample chart are created automatically by the setup script. Superset uses a dedicated PostgreSQL instance (`superset-postgres`) for metadata and `SimpleCache` (in-memory) instead of Redis.
+
 ## Project Structure
 
 ```
@@ -346,8 +389,16 @@ streaming-data-lake/
   trino/
     catalog/
       iceberg.properties           # Iceberg connector config for Trino
+  cloudbeaver/
+    initial-data-sources.conf      # Pre-configured Trino JDBC connection
+    initial-data.conf              # Admin credentials (skip setup wizard)
+  superset/
+    Dockerfile                     # Custom Superset image with Trino driver
+    superset_config.py             # Superset configuration (SimpleCache, no Redis)
+    bootstrap.sh                   # DB migration, admin creation, server start
+    setup-dashboards.py            # REST API script to create dashboards
   scripts/
-    setup.sh                       # Initialize topics, bucket, tables, Flink job, verify Trino
+    setup.sh                       # Initialize topics, bucket, tables, Flink job, verify Trino, setup dashboards
     run-local.sh                   # Run generator in local .venv
     query-examples.sh              # Sample analytical queries via Trino
     maintenance.sh                 # Iceberg table maintenance (compaction, expiry, cleanup)
