@@ -280,9 +280,9 @@ docker compose --profile generator down
 
 If you haven't started the generator, a plain `docker compose down` is sufficient.
 
-## Local Development (without Docker for the generator)
+## Local Debug Environment
 
-You can run the mock data generator outside Docker while keeping Kafka, Flink, and the other infrastructure services in Docker.
+You can debug the mock data generator locally in VS Code while keeping the infrastructure services in Docker.
 
 ### 1. Build and start infrastructure services
 
@@ -305,31 +305,19 @@ Creates the Kafka topics, MinIO bucket, Iceberg namespace + tables, submits the 
 bash scripts/setup.sh
 ```
 
-### 3. Run the generator locally
+### 3. Set up the local debug environment
 
-This creates a `.venv` virtual environment, installs dependencies, and starts the generator:
-
-```bash
-bash scripts/run-local.sh
-```
-
-You can override settings via environment variables:
+This creates a `.venv` virtual environment and installs the generator's dependencies:
 
 ```bash
-EVENTS_PER_SECOND=50 bash scripts/run-local.sh
+bash scripts/setup-generator-local-debug.sh
 ```
 
-Or set up the environment manually:
+### 4. Run/debug with VS Code
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install ./mock-data-gen
-cd mock-data-gen
-KAFKA_BOOTSTRAP_SERVERS=localhost:29092 python -m src.generator
-```
+Use the **"Mock Data Generator"** launch configuration (in `.vscode/launch.json`) to run or debug the generator. It points at `localhost:29092` and includes all funnel rate environment variables. Set breakpoints in `mock-data-gen/src/` and press F5.
 
-### 4. Verify the Flink pipeline
+### 5. Verify the Flink pipeline
 
 Check that the Flink job is running:
 
@@ -427,7 +415,7 @@ streaming-data-lake/
     setup-dashboards.py            # REST API script to create dashboards
   scripts/
     setup.sh                       # Initialize 4 topics, bucket, 4 tables, Flink job, verify Trino, setup dashboards
-    run-local.sh                   # Run generator in local .venv
+    setup-generator-local-debug.sh # Set up local .venv for debugging the generator
     query-examples.sh              # Sample analytical queries via Trino
     maintenance.sh                 # Iceberg table maintenance for all 4 tables (compaction, expiry, cleanup)
 ```

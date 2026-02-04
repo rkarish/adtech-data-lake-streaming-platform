@@ -2,17 +2,18 @@
 set -euo pipefail
 
 # =============================================================================
-# Run the mock data generator locally (outside Docker)
+# Set up a local debug environment for the mock data generator
 # =============================================================================
+# Creates a Python virtual environment, installs dependencies, and ensures
+# Kafka is running. Use the VS Code launch configuration to run/debug the
+# generator after this script completes.
+#
 # Prerequisites:
 #   - Python 3.12+
 #   - Kafka running (e.g. via `docker compose up kafka -d`)
 #
 # Usage:
-#   bash scripts/run-local.sh
-#
-# Override defaults with environment variables:
-#   KAFKA_BOOTSTRAP_SERVERS=localhost:29092 EVENTS_PER_SECOND=5 bash scripts/run-local.sh
+#   bash scripts/setup-generator-local-debug.sh
 # =============================================================================
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -44,14 +45,7 @@ source "${VENV_DIR}/bin/activate"
 echo "==> Installing mock-data-gen package..."
 pip install --quiet "${MOCK_DIR}"
 
-# Default to localhost when running outside Docker
-export KAFKA_BOOTSTRAP_SERVERS="${KAFKA_BOOTSTRAP_SERVERS:-localhost:29092}"
-export EVENTS_PER_SECOND="${EVENTS_PER_SECOND:-10}"
-export TOPIC_BID_REQUESTS="${TOPIC_BID_REQUESTS:-bid-requests}"
-
-echo "==> Starting mock data generator (${EVENTS_PER_SECOND} events/sec to ${KAFKA_BOOTSTRAP_SERVERS})..."
-echo "    Press Ctrl+C to stop."
 echo ""
-
-cd "${MOCK_DIR}"
-python -m src.generator
+echo "==> Local debug environment is ready."
+echo "    Virtual environment: ${VENV_DIR}"
+echo "    Use the VS Code launch configuration to run/debug the generator."
