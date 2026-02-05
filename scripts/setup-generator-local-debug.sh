@@ -37,13 +37,13 @@ if [ ! -d "${VENV_DIR}" ]; then
   python3 -m venv "${VENV_DIR}"
 fi
 
-# Activate virtual environment
-echo "==> Activating virtual environment..."
-source "${VENV_DIR}/bin/activate"
+# Upgrade pip
+echo "==> Upgrading pip..."
+"${VENV_DIR}/bin/pip" install --upgrade pip
 
-# Install dependencies
+# Install dependencies using the venv's pip directly
 echo "==> Installing mock-data-gen package..."
-pip install --quiet "${MOCK_DIR}"
+"${VENV_DIR}/bin/pip" install "${MOCK_DIR}"
 
 echo ""
 echo "==> Local debug environment is ready."

@@ -192,11 +192,11 @@ def create_dashboard_orm(title, slug, chart_id, refresh_frequency=15):
         from superset import db
         from superset.models.dashboard import Dashboard
         from superset.models.slice import Slice
-        existing = db.session.query(Dashboard).filter_by(slug=slug).first()
+        existing = db.session.query(Dashboard).filter_by(slug=slug).first()  # type: ignore[attr-defined]
         if existing:
             print(f"Dashboard '{title}' already exists (id={existing.id}), skipping")
             return existing.id
-        chart = db.session.query(Slice).filter_by(id=chart_id).first()
+        chart = db.session.query(Slice).filter_by(id=chart_id).first()  # type: ignore[attr-defined]
         if not chart:
             print(f"ERROR: Chart id={chart_id} not found")
             sys.exit(1)
@@ -221,20 +221,20 @@ def create_dashboard_orm(title, slug, chart_id, refresh_frequency=15):
                 "meta": {"width": 12, "height": 100, "chartId": chart_id, "sliceName": chart.slice_name}
             }
         }
-        dash = Dashboard(
-            dashboard_title=title,
-            slug=slug,
-            published=True,
-            position_json=json.dumps(position),
-            json_metadata=json.dumps({
+        dash = Dashboard(**{  # type: ignore[call-arg]
+            "dashboard_title": title,
+            "slug": slug,
+            "published": True,
+            "position_json": json.dumps(position),
+            "json_metadata": json.dumps({
                 "refresh_frequency": refresh_frequency,
                 "timed_refresh_immune_slices": [],
                 "color_scheme": "supersetColors"
             })
-        )
+        })
         dash.slices = [chart]
-        db.session.add(dash)
-        db.session.commit()
+        db.session.add(dash)  # type: ignore[attr-defined]
+        db.session.commit()  # type: ignore[attr-defined]
         print(f"Created dashboard '{title}' (id={dash.id}, auto-refresh={refresh_frequency}s)")
         return dash.id
 
