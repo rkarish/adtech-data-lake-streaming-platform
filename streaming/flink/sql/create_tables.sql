@@ -28,6 +28,13 @@ CREATE TEMPORARY TABLE kafka_bid_requests (
         `page` STRING,
         `publisher` ROW<`id` STRING, `name` STRING>
     >,
+    `app` ROW<
+        `id` STRING,
+        `bundle` STRING,
+        `storeurl` STRING,
+        `cat` ARRAY<STRING>,
+        `publisher` ROW<`id` STRING, `name` STRING>
+    >,
     `device` ROW<
         `ua` STRING,
         `ip` STRING,
@@ -102,6 +109,7 @@ CREATE TEMPORARY TABLE kafka_bid_responses (
 );
 
 -- 4. Kafka source table for impressions (flat JSON)
+-- Includes event_ts computed column and watermark for window aggregations
 CREATE TEMPORARY TABLE kafka_impressions (
     `impression_id` STRING,
     `request_id` STRING,
@@ -112,7 +120,11 @@ CREATE TEMPORARY TABLE kafka_impressions (
     `win_currency` STRING,
     `creative_id` STRING,
     `ad_domain` STRING,
-    `event_timestamp` STRING
+    `event_timestamp` STRING,
+    -- Computed column: parse ISO timestamp string to TIMESTAMP(3)
+    `event_ts` AS TO_TIMESTAMP(SUBSTRING(`event_timestamp`, 1, 26), 'yyyy-MM-dd''T''HH:mm:ss.SSSSSS'),
+    -- Watermark for event-time windowing (5 second tolerance for late data)
+    WATERMARK FOR `event_ts` AS `event_ts` - INTERVAL '5' SECOND
 ) WITH (
     'connector' = 'kafka',
     'topic' = 'impressions',
@@ -143,4 +155,53 @@ CREATE TEMPORARY TABLE kafka_clicks (
     'format' = 'json',
     'json.fail-on-missing-field' = 'false',
     'json.ignore-parse-errors' = 'true'
+);
+
+-- 6. Iceberg sink table for hourly_impressions_by_geo (upsert mode)
+-- Explicit sink definition required for Flink-Iceberg upsert writes
+-- PK: (window_start, device_geo_country) matches Iceberg identifier-field-ids
+CREATE TABLE iceberg_hourly_impressions_by_geo (
+    `window_start` TIMESTAMP(3),
+    `device_geo_country` STRING,
+    `impression_count` BIGINT,
+    `total_revenue` DOUBLE,
+    `avg_win_price` DOUBLE,
+    PRIMARY KEY (`window_start`, `device_geo_country`) NOT ENFORCED
+) WITH (
+    'connector' = 'iceberg',
+    'catalog-type' = 'rest',
+    'uri' = 'http://iceberg-rest:8181',
+    'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
+    's3.endpoint' = 'http://minio:9000',
+    's3.path-style-access' = 'true',
+    'warehouse' = 's3://warehouse/',
+    'catalog-name' = 'iceberg_catalog',
+    'catalog-database' = 'db',
+    'catalog-table' = 'hourly_impressions_by_geo',
+    'upsert-enabled' = 'true'
+);
+
+-- 7. Iceberg sink table for rolling_metrics_by_bidder (upsert mode)
+-- Explicit sink definition required for Flink-Iceberg upsert writes
+-- PK: (window_start, bidder_id) matches Iceberg identifier-field-ids
+CREATE TABLE iceberg_rolling_metrics_by_bidder (
+    `window_start` TIMESTAMP(3),
+    `window_end` TIMESTAMP(3),
+    `bidder_id` STRING,
+    `win_count` BIGINT,
+    `revenue` DOUBLE,
+    `avg_cpm` DOUBLE,
+    PRIMARY KEY (`window_start`, `bidder_id`) NOT ENFORCED
+) WITH (
+    'connector' = 'iceberg',
+    'catalog-type' = 'rest',
+    'uri' = 'http://iceberg-rest:8181',
+    'io-impl' = 'org.apache.iceberg.aws.s3.S3FileIO',
+    's3.endpoint' = 'http://minio:9000',
+    's3.path-style-access' = 'true',
+    'warehouse' = 's3://warehouse/',
+    'catalog-name' = 'iceberg_catalog',
+    'catalog-database' = 'db',
+    'catalog-table' = 'rolling_metrics_by_bidder',
+    'upsert-enabled' = 'true'
 );

@@ -799,13 +799,80 @@ GROUP BY
   bidder_id;
 ```
 
-##### 6.3.4 Funnel Metrics Aggregation
+#### 6.4 Mock Data Enhancements
 
-Pre-compute funnel conversion rates by publisher for dashboard queries.
+To exercise the transformation and aggregation features, enhance the mock data generator:
 
-**Flink SQL (using interval joins):**
+| Enhancement | Purpose |
+|---|---|
+| Add `bidfloorcur` variation | Generate EUR, GBP, JPY bid floors (10% of requests) to test currency normalization |
+| Add `app` object | Generate app traffic (30% of requests) alongside site traffic for device classification |
+| Add test publisher IDs | Generate `test-*` publisher IDs (5% of requests) to test traffic filtering |
+| Add invalid IPs | Generate RFC1918 private IPs (2% of requests) to test IP filtering |
+
+#### 6.5 New Iceberg Tables
+
+| Table | Type | Purpose |
+|---|---|---|
+| `bid_requests_enriched` | Append | Bid requests with device classification |
+| `hourly_impressions_by_geo` | Upsert | Hourly impression metrics by country |
+| `rolling_metrics_by_bidder` | Upsert | 5-minute rolling metrics by bidder |
+
+#### 6.6 Considerations & Limitations
+
+- **Upsert overhead**: Equality deletes create merge-on-read overhead; run compaction frequently on aggregate tables
+- **Late data**: Configure allowed lateness for windows; late arrivals may be dropped or sent to a side output
+- **State size**: Interval joins and large windows accumulate state; configure state TTL and checkpointing appropriately
+- **Iceberg format version**: Upsert mode requires Iceberg format v2 (supports row-level deletes)
+
+#### 6.7 Modified Files Summary
+
+| File | Changes |
+|---|---|
+| `mock-data-gen/src/schemas.py` | Add currency variation, app object, test traffic flags |
+| `mock-data-gen/src/config.py` | Add config for test/invalid traffic rates |
+| `streaming/flink/sql/create_tables.sql` | Add enriched source tables and aggregate sink tables |
+| `streaming/flink/sql/aggregation_jobs.sql` | New file: streaming aggregation INSERT statements |
+| `scripts/setup.sh` | Create new Iceberg aggregate tables |
+| `superset/setup-dashboards.py` | Add charts for real-time aggregate tables |
+
+### Phase 7: Funnel Metrics Aggregation
+
+Implement streaming funnel metrics using Flink interval joins across the 4 Kafka streams. This is separated from Phase 6 due to the complexity of managing state across multiple streams.
+
+#### 7.1 Overview
+
+Pre-compute funnel conversion rates by publisher for dashboard queries. This requires joining bid requests with responses, impressions, and clicks within time windows.
+
+#### 7.2 New Iceberg Table
+
+| Table | Type | Purpose |
+|---|---|---|
+| `hourly_funnel_by_publisher` | Upsert | Hourly funnel conversion rates by publisher |
+
+**Schema:**
 ```sql
--- Join bid requests with responses within a time window
+CREATE TABLE iceberg_catalog.db.hourly_funnel_by_publisher (
+  window_start TIMESTAMP(3),
+  publisher_id STRING,
+  bid_requests BIGINT,
+  bid_responses BIGINT,
+  impressions BIGINT,
+  clicks BIGINT,
+  fill_rate DOUBLE,
+  win_rate DOUBLE,
+  ctr DOUBLE,
+  PRIMARY KEY (window_start, publisher_id) NOT ENFORCED
+) WITH (
+  'format-version' = '2',
+  'write.upsert.enabled' = 'true'
+);
+```
+
+#### 7.3 Flink SQL (Interval Joins)
+
+```sql
+-- Join bid requests with responses, impressions, clicks within time windows
 INSERT INTO iceberg_catalog.db.hourly_funnel_by_publisher
 SELECT
   TUMBLE_START(br.event_timestamp, INTERVAL '1' HOUR) AS window_start,
@@ -832,45 +899,14 @@ GROUP BY
   br.publisher_id;
 ```
 
-#### 6.4 Mock Data Enhancements
+#### 7.4 Considerations
 
-To exercise the transformation and aggregation features, enhance the mock data generator:
+- **State management**: Interval joins accumulate state for the duration of the join windows; configure state TTL appropriately
+- **Watermarks**: Requires proper watermark configuration for event-time processing
+- **Late data**: Events arriving after the window closes will be dropped; configure allowed lateness if needed
+- **Separate job**: Run as a separate Flink job from the Phase 6 aggregations for independent lifecycle management
 
-| Enhancement | Purpose |
-|---|---|
-| Add `bidfloorcur` variation | Generate EUR, GBP, JPY bid floors (10% of requests) to test currency normalization |
-| Add `app` object | Generate app traffic (30% of requests) alongside site traffic for device classification |
-| Add test publisher IDs | Generate `test-*` publisher IDs (5% of requests) to test traffic filtering |
-| Add invalid IPs | Generate RFC1918 private IPs (2% of requests) to test IP filtering |
-
-#### 6.5 New Iceberg Tables
-
-| Table | Type | Purpose |
-|---|---|---|
-| `bid_requests_enriched` | Append | Bid requests with device classification |
-| `hourly_impressions_by_geo` | Upsert | Hourly impression metrics by country |
-| `rolling_metrics_by_bidder` | Upsert | 5-minute rolling metrics by bidder |
-| `hourly_funnel_by_publisher` | Upsert | Hourly funnel conversion rates by publisher |
-
-#### 6.6 Considerations & Limitations
-
-- **Upsert overhead**: Equality deletes create merge-on-read overhead; run compaction frequently on aggregate tables
-- **Late data**: Configure allowed lateness for windows; late arrivals may be dropped or sent to a side output
-- **State size**: Interval joins and large windows accumulate state; configure state TTL and checkpointing appropriately
-- **Iceberg format version**: Upsert mode requires Iceberg format v2 (supports row-level deletes)
-
-#### 6.7 Modified Files Summary
-
-| File | Changes |
-|---|---|
-| `mock-data-gen/src/schemas.py` | Add currency variation, app object, test traffic flags |
-| `mock-data-gen/src/config.py` | Add config for test/invalid traffic rates |
-| `streaming/flink/sql/create_tables.sql` | Add enriched source tables and aggregate sink tables |
-| `streaming/flink/sql/aggregation_jobs.sql` | New file: streaming aggregation INSERT statements |
-| `scripts/setup.sh` | Create new Iceberg aggregate tables |
-| `superset/setup-dashboards.py` | Add charts for real-time aggregate tables |
-
-### Phase 7: Cloud Readiness
+### Phase 8: Cloud Readiness
 - Parameterize storage and catalog configs for AWS/GCP
 - Document deployment steps for each cloud
 - CI/CD pipeline for streaming job deployment

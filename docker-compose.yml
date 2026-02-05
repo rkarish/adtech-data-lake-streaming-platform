@@ -84,6 +84,11 @@ services:
       BID_RESPONSE_RATE: 0.60
       WIN_RATE: 0.15
       CLICK_RATE: 0.02
+      # Phase 6: Traffic variation rates for testing stream transformations
+      TEST_PUBLISHER_RATE: 0.05
+      INVALID_IP_RATE: 0.02
+      APP_TRAFFIC_RATE: 0.30
+      NON_USD_CURRENCY_RATE: 0.10
     restart: on-failure
 
   trino:

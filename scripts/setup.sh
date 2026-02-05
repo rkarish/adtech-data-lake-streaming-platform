@@ -7,7 +7,9 @@ set -euo pipefail
 # Run this script AFTER `docker compose up -d` to initialize:
 #   1. Kafka topics (bid-requests, bid-responses, impressions, clicks)
 #   2. MinIO bucket (warehouse)
-#   3. Iceberg namespace and tables (db.bid_requests, bid_responses, impressions, clicks)
+#   3. Iceberg namespace and tables:
+#      - Core: db.bid_requests, bid_responses, impressions, clicks
+#      - Phase 6: db.bid_requests_enriched, hourly_impressions_by_geo, rolling_metrics_by_bidder
 #   4. Flink streaming job (Kafka -> Iceberg)
 #   5. Trino connectivity verification
 #   6. CloudBeaver readiness check
@@ -254,6 +256,151 @@ else
   exit 1
 fi
 
+# -- 3f: Create table 'bid_requests_enriched' (Phase 6: with device classification and traffic flags) --
+echo "==> Creating Iceberg table 'db.bid_requests_enriched'..."
+
+enriched_payload='{
+  "name": "bid_requests_enriched",
+  "schema": {
+    "type": "struct",
+    "fields": [
+      {"id": 1, "name": "request_id", "type": "string", "required": false},
+      {"id": 2, "name": "imp_id", "type": "string", "required": false},
+      {"id": 3, "name": "imp_banner_w", "type": "int", "required": false},
+      {"id": 4, "name": "imp_banner_h", "type": "int", "required": false},
+      {"id": 5, "name": "imp_bidfloor", "type": "double", "required": false},
+      {"id": 6, "name": "imp_bidfloor_usd", "type": "double", "required": false},
+      {"id": 7, "name": "imp_bidfloorcur", "type": "string", "required": false},
+      {"id": 8, "name": "site_id", "type": "string", "required": false},
+      {"id": 9, "name": "site_domain", "type": "string", "required": false},
+      {"id": 10, "name": "app_id", "type": "string", "required": false},
+      {"id": 11, "name": "app_bundle", "type": "string", "required": false},
+      {"id": 12, "name": "publisher_id", "type": "string", "required": false},
+      {"id": 13, "name": "device_type", "type": "int", "required": false},
+      {"id": 14, "name": "device_os", "type": "string", "required": false},
+      {"id": 15, "name": "device_ip", "type": "string", "required": false},
+      {"id": 16, "name": "device_geo_country", "type": "string", "required": false},
+      {"id": 17, "name": "device_geo_region", "type": "string", "required": false},
+      {"id": 18, "name": "device_category", "type": "string", "required": false},
+      {"id": 19, "name": "user_id", "type": "string", "required": false},
+      {"id": 20, "name": "auction_type", "type": "int", "required": false},
+      {"id": 21, "name": "currency", "type": "string", "required": false},
+      {"id": 22, "name": "is_coppa", "type": "boolean", "required": false},
+      {"id": 23, "name": "is_gdpr", "type": "boolean", "required": false},
+      {"id": 24, "name": "is_test_traffic", "type": "boolean", "required": false},
+      {"id": 25, "name": "is_private_ip", "type": "boolean", "required": false},
+      {"id": 26, "name": "event_timestamp", "type": "timestamptz", "required": false},
+      {"id": 27, "name": "received_at", "type": "timestamptz", "required": false}
+    ]
+  },
+  "partition-spec": {
+    "spec-id": 0,
+    "fields": [
+      {"source-id": 26, "transform": "day", "name": "event_timestamp_day", "field-id": 1000},
+      {"source-id": 18, "transform": "identity", "name": "device_category", "field-id": 1001}
+    ]
+  },
+  "write-order": {"order-id": 0, "fields": []},
+  "properties": {"format-version": "2"}
+}'
+
+enr_http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+  -X POST "${ICEBERG_REST_URL}/v1/namespaces/db/tables" \
+  -H "Content-Type: application/json" \
+  -d "${enriched_payload}")
+
+if [ "$enr_http_code" -eq 200 ]; then
+  echo "    Table 'db.bid_requests_enriched' created successfully."
+elif [ "$enr_http_code" -eq 409 ]; then
+  echo "    Table 'db.bid_requests_enriched' already exists, skipping."
+else
+  echo "    ERROR: Failed to create table 'db.bid_requests_enriched' (HTTP ${enr_http_code})."
+  exit 1
+fi
+
+# -- 3g: Create table 'hourly_impressions_by_geo' (Phase 6: upsert aggregation table) --
+echo "==> Creating Iceberg table 'db.hourly_impressions_by_geo'..."
+
+geo_agg_payload='{
+  "name": "hourly_impressions_by_geo",
+  "schema": {
+    "type": "struct",
+    "schema-id": 0,
+    "identifier-field-ids": [1, 2],
+    "fields": [
+      {"id": 1, "name": "window_start", "type": "timestamp", "required": true},
+      {"id": 2, "name": "device_geo_country", "type": "string", "required": true},
+      {"id": 3, "name": "impression_count", "type": "long", "required": false},
+      {"id": 4, "name": "total_revenue", "type": "double", "required": false},
+      {"id": 5, "name": "avg_win_price", "type": "double", "required": false}
+    ]
+  },
+  "partition-spec": {
+    "spec-id": 0,
+    "fields": [
+      {"source-id": 1, "transform": "day", "name": "window_day", "field-id": 1000}
+    ]
+  },
+  "write-order": {"order-id": 0, "fields": []},
+  "properties": {"format-version": "2", "write.upsert.enabled": "true"}
+}'
+
+geo_http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+  -X POST "${ICEBERG_REST_URL}/v1/namespaces/db/tables" \
+  -H "Content-Type: application/json" \
+  -d "${geo_agg_payload}")
+
+if [ "$geo_http_code" -eq 200 ]; then
+  echo "    Table 'db.hourly_impressions_by_geo' created successfully."
+elif [ "$geo_http_code" -eq 409 ]; then
+  echo "    Table 'db.hourly_impressions_by_geo' already exists, skipping."
+else
+  echo "    ERROR: Failed to create table 'db.hourly_impressions_by_geo' (HTTP ${geo_http_code})."
+  exit 1
+fi
+
+# -- 3h: Create table 'rolling_metrics_by_bidder' (Phase 6: upsert aggregation table) --
+echo "==> Creating Iceberg table 'db.rolling_metrics_by_bidder'..."
+
+bidder_agg_payload='{
+  "name": "rolling_metrics_by_bidder",
+  "schema": {
+    "type": "struct",
+    "schema-id": 0,
+    "identifier-field-ids": [1, 3],
+    "fields": [
+      {"id": 1, "name": "window_start", "type": "timestamp", "required": true},
+      {"id": 2, "name": "window_end", "type": "timestamp", "required": false},
+      {"id": 3, "name": "bidder_id", "type": "string", "required": true},
+      {"id": 4, "name": "win_count", "type": "long", "required": false},
+      {"id": 5, "name": "revenue", "type": "double", "required": false},
+      {"id": 6, "name": "avg_cpm", "type": "double", "required": false}
+    ]
+  },
+  "partition-spec": {
+    "spec-id": 0,
+    "fields": [
+      {"source-id": 1, "transform": "day", "name": "window_day", "field-id": 1000}
+    ]
+  },
+  "write-order": {"order-id": 0, "fields": []},
+  "properties": {"format-version": "2", "write.upsert.enabled": "true"}
+}'
+
+bidder_http_code=$(curl -s -o /dev/null -w "%{http_code}" \
+  -X POST "${ICEBERG_REST_URL}/v1/namespaces/db/tables" \
+  -H "Content-Type: application/json" \
+  -d "${bidder_agg_payload}")
+
+if [ "$bidder_http_code" -eq 200 ]; then
+  echo "    Table 'db.rolling_metrics_by_bidder' created successfully."
+elif [ "$bidder_http_code" -eq 409 ]; then
+  echo "    Table 'db.rolling_metrics_by_bidder' already exists, skipping."
+else
+  echo "    ERROR: Failed to create table 'db.rolling_metrics_by_bidder' (HTTP ${bidder_http_code})."
+  exit 1
+fi
+
 # -----------------------------------------------------------------------------
 # Task 4: Submit Flink streaming job
 # -----------------------------------------------------------------------------
@@ -281,14 +428,14 @@ while [ $attempt -lt $max_attempts ]; do
   attempt=$((attempt + 1))
   tables=$(docker exec trino trino --catalog iceberg --schema db --execute "SHOW TABLES" 2>/dev/null || true)
   found=true
-  for t in bid_requests bid_responses impressions clicks; do
+  for t in bid_requests bid_responses impressions clicks bid_requests_enriched hourly_impressions_by_geo rolling_metrics_by_bidder; do
     if ! echo "$tables" | grep -q "$t"; then
       found=false
       break
     fi
   done
   if [ "$found" = true ]; then
-    echo "    Trino verified: all 4 tables are visible (bid_requests, bid_responses, impressions, clicks)."
+    echo "    Trino verified: all 7 tables are visible."
     break
   fi
   if [ $attempt -eq $max_attempts ]; then
@@ -356,6 +503,9 @@ echo "==> Setup complete. Infrastructure is ready:"
 echo "    - Kafka topics:   bid-requests, bid-responses, impressions, clicks (3 partitions each)"
 echo "    - MinIO bucket:   s3://warehouse"
 echo "    - Iceberg tables: db.bid_requests, db.bid_responses, db.impressions, db.clicks"
+echo "                      db.bid_requests_enriched (with device classification)"
+echo "                      db.hourly_impressions_by_geo (upsert aggregation)"
+echo "                      db.rolling_metrics_by_bidder (upsert aggregation)"
 echo "    - Flink job:      Streaming Kafka -> Iceberg (check http://localhost:8081)"
 echo "    - Trino:          Query engine ready (http://localhost:8080)"
 echo "    - CloudBeaver:    Web SQL IDE ready (http://localhost:8978)"

@@ -34,10 +34,27 @@ echo "All dependencies are reachable. Submitting Flink SQL job..."
 echo ""
 
 # -----------------------------------------------------------------------------
-# Submit SQL via embedded SQL Client
+# Submit main ingestion job via embedded SQL Client
 # -----------------------------------------------------------------------------
+echo "Submitting main ingestion job (Kafka -> Iceberg)..."
 cat "${SQL_DIR}/create_tables.sql" "${SQL_DIR}/insert_jobs.sql" \
     | /opt/flink/bin/sql-client.sh embedded
 
 echo ""
-echo "Flink SQL job submitted successfully."
+echo "Main ingestion job submitted."
+
+# -----------------------------------------------------------------------------
+# Submit aggregation jobs (Phase 6: windowed aggregations)
+# -----------------------------------------------------------------------------
+if [ -f "${SQL_DIR}/aggregation_jobs.sql" ]; then
+    echo ""
+    echo "Submitting aggregation jobs (Phase 6: windowed aggregations)..."
+    cat "${SQL_DIR}/create_tables.sql" "${SQL_DIR}/aggregation_jobs.sql" \
+        | /opt/flink/bin/sql-client.sh embedded
+    echo "Aggregation jobs submitted."
+else
+    echo "No aggregation_jobs.sql found, skipping."
+fi
+
+echo ""
+echo "All Flink SQL jobs submitted successfully."

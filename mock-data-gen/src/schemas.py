@@ -16,11 +16,18 @@ from datetime import datetime, timezone, timedelta
 
 from faker import Faker
 
+from src.config import config
+
 fake = Faker()
 
 # ---------------------------------------------------------------------------
 # Weighted distributions for realistic data generation
 # ---------------------------------------------------------------------------
+
+# Currency codes and weights for bid floor currency variation
+# USD dominates, with ~10% non-USD for testing currency normalization
+CURRENCIES = ["USD", "EUR", "GBP", "JPY"]
+CURRENCY_WEIGHTS = [0.90, 0.04, 0.03, 0.03]
 
 # Common IAB banner ad sizes (width, height) with market share weights
 # 300x250 (medium rectangle) is the most common display ad format
@@ -74,6 +81,43 @@ IAB_CATEGORIES = [f"IAB{i}" for i in range(1, 11)]
 # Maximum time (ms) the bidder has to respond to the bid request
 TMAX_CHOICES = [100, 120, 150, 200, 300]
 
+# ---------------------------------------------------------------------------
+# App traffic data pools (for mobile app vs web site traffic variation)
+# ---------------------------------------------------------------------------
+
+# App store platforms for generating storeurl
+APP_STORES = ["apple", "google"]
+
+# Common app bundle ID prefixes (reverse domain notation)
+APP_BUNDLE_PREFIXES = ["com.game.", "com.news.", "com.social.", "io.app.", "net.media."]
+
+
+def generate_private_ip() -> str:
+    """
+    Generate a random RFC1918 private IP address.
+
+    Private IP ranges (RFC1918):
+      - 10.0.0.0/8       (10.0.0.0 - 10.255.255.255)
+      - 172.16.0.0/12    (172.16.0.0 - 172.31.255.255)
+      - 192.168.0.0/16   (192.168.0.0 - 192.168.255.255)
+
+    These IPs are used to test traffic filtering pipelines that should
+    exclude invalid/internal traffic from analytics.
+
+    Returns:
+        str: A random private IP address from one of the RFC1918 ranges
+    """
+    range_choice = random.randint(1, 3)
+    if range_choice == 1:
+        # 10.x.x.x range
+        return f"10.{random.randint(0, 255)}.{random.randint(0, 255)}.{random.randint(1, 254)}"
+    elif range_choice == 2:
+        # 192.168.x.x range
+        return f"192.168.{random.randint(0, 255)}.{random.randint(1, 254)}"
+    else:
+        # 172.16-31.x.x range
+        return f"172.{random.randint(16, 31)}.{random.randint(0, 255)}.{random.randint(1, 254)}"
+
 
 def generate_bid_request() -> dict:
     """
@@ -85,6 +129,12 @@ def generate_bid_request() -> dict:
     - The website/app where the ad will appear
     - The user's device and location
     - Auction parameters and regulatory compliance flags
+
+    Traffic variations (controlled by config):
+    - app_traffic_rate: Percentage of requests from mobile apps vs websites
+    - test_publisher_rate: Percentage of requests with test-* publisher IDs
+    - invalid_ip_rate: Percentage of requests with RFC1918 private IPs
+    - non_usd_currency_rate: Percentage of requests with non-USD bid floor currency
 
     Returns:
         dict: A complete OpenRTB 2.6 BidRequest object with realistic mock data
@@ -108,24 +158,80 @@ def generate_bid_request() -> dict:
     lat = round(random.uniform(*coords["lat"]), 4)
     lon = round(random.uniform(*coords["lon"]), 4)
 
-    # Generate publisher/site information using Faker for realistic names and URLs
-    site_id = f"site-{random.randint(100, 999)}"
-    pub_id = f"pub-{random.randint(100, 999)}"
+    # Determine if this is a test publisher (for traffic filtering tests)
+    is_test_publisher = random.random() < config.test_publisher_rate
+    if is_test_publisher:
+        pub_id = f"test-{random.randint(100, 999)}"
+    else:
+        pub_id = f"pub-{random.randint(100, 999)}"
     pub_name = fake.company()
-    domain = fake.domain_name()
-    page_path = fake.uri_path()
-    page_url = f"https://{domain}/{page_path}"
 
-    # Assign 1-3 random IAB content categories to the page
+    # Assign 1-3 random IAB content categories
     num_cats = random.randint(1, 3)
     categories = random.sample(IAB_CATEGORIES, k=num_cats)
+
+    # Determine if this is app traffic or site traffic
+    is_app_traffic = random.random() < config.app_traffic_rate
+
+    if is_app_traffic:
+        # Generate app object for mobile app traffic
+        app_id = f"app-{random.randint(100, 999)}"
+        app_prefix = random.choice(APP_BUNDLE_PREFIXES)
+        app_bundle = f"{app_prefix}{fake.slug()}"
+        app_store = random.choice(APP_STORES)
+        if app_store == "apple":
+            storeurl = f"https://apps.apple.com/app/id{random.randint(100000000, 999999999)}"
+        else:
+            storeurl = f"https://play.google.com/store/apps/details?id={app_bundle}"
+        inventory_source = {
+            "app": {
+                "id": app_id,
+                "bundle": app_bundle,
+                "storeurl": storeurl,
+                "cat": categories,
+                "publisher": {"id": pub_id, "name": pub_name},
+            }
+        }
+    else:
+        # Generate site object for web traffic
+        site_id = f"site-{random.randint(100, 999)}"
+        domain = fake.domain_name()
+        page_path = fake.uri_path()
+        page_url = f"https://{domain}/{page_path}"
+        inventory_source = {
+            "site": {
+                "id": site_id,
+                "domain": domain,
+                "cat": categories,
+                "page": page_url,
+                "publisher": {"id": pub_id, "name": pub_name},
+            }
+        }
 
     # Auction settings
     # at=1: First-price auction (winner pays their bid)
     # at=2: Second-price auction (winner pays second-highest bid + $0.01)
     auction_type = random.choices([1, 2], weights=[0.70, 0.30], k=1)[0]
     tmax = random.choice(TMAX_CHOICES)  # Max response time in milliseconds
-    bidfloor = round(random.uniform(0.01, 5.00), 2)  # Minimum CPM in USD
+    bidfloor = round(random.uniform(0.01, 5.00), 2)  # Minimum CPM
+
+    # Currency selection: use non-USD currency based on config rate
+    if random.random() < config.non_usd_currency_rate:
+        # Select from non-USD currencies (EUR, GBP, JPY)
+        non_usd_currencies = CURRENCIES[1:]  # Skip USD
+        non_usd_weights = CURRENCY_WEIGHTS[1:]  # Skip USD weight
+        # Normalize weights for non-USD selection
+        total_weight = sum(non_usd_weights)
+        normalized_weights = [w / total_weight for w in non_usd_weights]
+        currency = random.choices(non_usd_currencies, weights=normalized_weights, k=1)[0]
+    else:
+        currency = "USD"
+
+    # IP address: use private IP for invalid traffic filtering tests
+    if random.random() < config.invalid_ip_rate:
+        ip_address = generate_private_ip()
+    else:
+        ip_address = fake.ipv4()
 
     # Regulatory compliance flags
     # COPPA: Children's Online Privacy Protection Act (US)
@@ -139,27 +245,20 @@ def generate_bid_request() -> dict:
     received_at = event_ts + timedelta(milliseconds=random.randint(1, 50))
 
     # Construct the complete OpenRTB 2.6 BidRequest object
-    return {
+    bid_request = {
         "id": fake.uuid4(),  # Unique request identifier
         "imp": [
             {
                 "id": "1",  # Impression ID within this request
                 "banner": {"w": w, "h": h, "pos": banner_pos},
                 "bidfloor": bidfloor,  # Minimum bid price (CPM)
-                "bidfloorcur": "USD",
+                "bidfloorcur": currency,  # Currency for bid floor
                 "secure": 1,  # Require HTTPS creative
             }
         ],
-        "site": {
-            "id": site_id,
-            "domain": domain,
-            "cat": categories,  # IAB content categories
-            "page": page_url,
-            "publisher": {"id": pub_id, "name": pub_name},
-        },
         "device": {
             "ua": fake.user_agent(),  # Browser user agent string
-            "ip": fake.ipv4(),  # User's IP address
+            "ip": ip_address,  # User's IP address (may be private for testing)
             "geo": {
                 "lat": lat,
                 "lon": lon,
@@ -176,7 +275,7 @@ def generate_bid_request() -> dict:
         },
         "at": auction_type,  # Auction type (1=first-price, 2=second-price)
         "tmax": tmax,  # Max response time in ms
-        "cur": ["USD"],  # Accepted currencies
+        "cur": [currency],  # Accepted currencies (matches bidfloorcur)
         "source": {
             "fd": 1,  # Entity responsible for final decision (1=exchange)
             "tid": fake.uuid4(),  # Transaction ID for the entire auction
@@ -188,6 +287,11 @@ def generate_bid_request() -> dict:
         "event_timestamp": event_ts.isoformat(),
         "received_at": received_at.isoformat(),
     }
+
+    # Add either site or app object (mutually exclusive per OpenRTB spec)
+    bid_request.update(inventory_source)
+
+    return bid_request
 
 
 # ---------------------------------------------------------------------------

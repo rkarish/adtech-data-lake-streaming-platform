@@ -270,6 +270,13 @@ Open [http://localhost:8088](http://localhost:8088) and log in with `admin` / `p
 
 You can also use SQL Lab to run ad-hoc queries against Trino.
 
+To redeploy `setup-dashboards.py` after making changes, restart the container to sync the bind-mounted file and re-run the script:
+
+```bash
+docker restart superset
+docker exec superset python /app/setup-dashboards.py
+```
+
 ### 10. Stop
 
 If the mock data generator is running, you must include the `generator` profile when stopping -- otherwise the generator container keeps running and holds the Docker network open:

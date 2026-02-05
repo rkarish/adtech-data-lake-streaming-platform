@@ -45,6 +45,16 @@ class Config:
     # impression -> click: ~2% CTR (click-through rate)
     click_rate: float = float(os.environ.get("CLICK_RATE", "0.02"))
 
+    # Traffic variation rates for Phase 6 stream transformations testing
+    # Rate of test publisher IDs (test-*) for traffic filtering tests
+    test_publisher_rate: float = float(os.environ.get("TEST_PUBLISHER_RATE", "0.05"))
+    # Rate of RFC1918 private IPs for invalid traffic filtering tests
+    invalid_ip_rate: float = float(os.environ.get("INVALID_IP_RATE", "0.02"))
+    # Rate of app traffic vs site traffic for device classification tests
+    app_traffic_rate: float = float(os.environ.get("APP_TRAFFIC_RATE", "0.30"))
+    # Rate of non-USD currencies for currency normalization tests
+    non_usd_currency_rate: float = float(os.environ.get("NON_USD_CURRENCY_RATE", "0.10"))
+
 
 # Singleton instance used throughout the application
 config = Config()

@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Set up Superset resources for the AdTech Data Lake Streaming Platform.
 
-Creates a Trino database connection, bid_requests dataset, and a pie chart
-showing bid requests by country.
+Creates:
+- Trino database connection
+- Datasets for all Iceberg tables (core funnel + Phase 6 enriched/aggregation)
+- Charts for visualizing the data:
+  - Core: Bid requests by country, responses by bidder seat, impressions by bidder, clicks by creative
+  - Requests by device category, test vs production traffic, hourly revenue by bidder
+
 All operations are idempotent -- existing resources are skipped.
 """
 
@@ -167,16 +172,82 @@ def create_chart(session, chart_name, viz_type, dataset_id, params):
     return chart_id
 
 
+def create_dashboard_orm(title, slug, chart_id, refresh_frequency=15):
+    """Create a single-chart dashboard with auto-refresh via Superset ORM.
+
+    The REST API does not establish the dashboard-slices relationship needed
+    for charts to render, so we use the ORM directly.
+    """
+    from superset.app import create_app
+    app = create_app()
+    with app.app_context():
+        from superset import db
+        from superset.models.dashboard import Dashboard
+        from superset.models.slice import Slice
+        existing = db.session.query(Dashboard).filter_by(slug=slug).first()
+        if existing:
+            print(f"Dashboard '{title}' already exists (id={existing.id}), skipping")
+            return existing.id
+        chart = db.session.query(Slice).filter_by(id=chart_id).first()
+        if not chart:
+            print(f"ERROR: Chart id={chart_id} not found")
+            sys.exit(1)
+        chart_key = f"CHART-{chart_id}"
+        position = {
+            "DASHBOARD_VERSION_KEY": "v2",
+            "ROOT_ID": {"type": "ROOT", "id": "ROOT_ID", "children": ["GRID_ID"]},
+            "GRID_ID": {"type": "GRID", "id": "GRID_ID", "children": ["ROW-0"], "parents": ["ROOT_ID"]},
+            "HEADER_ID": {"type": "HEADER", "id": "HEADER_ID", "meta": {"text": title}},
+            "ROW-0": {
+                "type": "ROW",
+                "id": "ROW-0",
+                "children": [chart_key],
+                "parents": ["ROOT_ID", "GRID_ID"],
+                "meta": {"background": "BACKGROUND_TRANSPARENT"}
+            },
+            chart_key: {
+                "type": "CHART",
+                "id": chart_key,
+                "children": [],
+                "parents": ["ROOT_ID", "GRID_ID", "ROW-0"],
+                "meta": {"width": 12, "height": 100, "chartId": chart_id, "sliceName": chart.slice_name}
+            }
+        }
+        dash = Dashboard(
+            dashboard_title=title,
+            slug=slug,
+            published=True,
+            position_json=json.dumps(position),
+            json_metadata=json.dumps({
+                "refresh_frequency": refresh_frequency,
+                "timed_refresh_immune_slices": [],
+                "color_scheme": "supersetColors"
+            })
+        )
+        dash.slices = [chart]
+        db.session.add(dash)
+        db.session.commit()
+        print(f"Created dashboard '{title}' (id={dash.id}, auto-refresh={refresh_frequency}s)")
+        return dash.id
+
+
 def main():
     print("Setting up Superset for AdTech Data Lake...")
     session = requests.Session()
     login(session)
     get_csrf_token(session)
     database_id = create_database(session)
+
+    # Core funnel tables (Phase 1-5)
     ds_bid_requests = create_dataset(session, database_id, "bid_requests")
     ds_bid_responses = create_dataset(session, database_id, "bid_responses")
     ds_impressions = create_dataset(session, database_id, "impressions")
     ds_clicks = create_dataset(session, database_id, "clicks")
+
+    # Enriched and aggregation tables
+    ds_enriched = create_dataset(session, database_id, "bid_requests_enriched")
+    ds_hourly_geo = create_dataset(session, database_id, "hourly_impressions_by_geo")
+    ds_rolling_bidder = create_dataset(session, database_id, "rolling_metrics_by_bidder")
 
     count_metric = lambda col: {
         "expressionType": "SIMPLE",
@@ -185,6 +256,14 @@ def main():
         "label": "COUNT(*)"
     }
 
+    sum_metric = lambda col, label: {
+        "expressionType": "SIMPLE",
+        "column": {"column_name": col},
+        "aggregate": "SUM",
+        "label": label
+    }
+
+    # Core funnel charts
     create_chart(session, "Bid Requests by Country", "pie", ds_bid_requests, {
         "viz_type": "pie",
         "groupby": ["device_geo_country"],
@@ -196,7 +275,6 @@ def main():
         "show_labels": True,
         "show_legend": True
     })
-
     create_chart(session, "Bid Responses by Bidder Seat", "pie", ds_bid_responses, {
         "viz_type": "pie",
         "groupby": ["seat"],
@@ -208,7 +286,6 @@ def main():
         "show_labels": True,
         "show_legend": True
     })
-
     create_chart(session, "Impressions by Bidder", "pie", ds_impressions, {
         "viz_type": "pie",
         "groupby": ["bidder_id"],
@@ -220,7 +297,6 @@ def main():
         "show_labels": True,
         "show_legend": True
     })
-
     create_chart(session, "Clicks by Creative", "pie", ds_clicks, {
         "viz_type": "pie",
         "groupby": ["creative_id"],
@@ -232,6 +308,67 @@ def main():
         "show_labels": True,
         "show_legend": True
     })
+
+    # Device classification chart
+    create_chart(session, "Requests by Device Category", "pie", ds_enriched, {
+        "viz_type": "pie",
+        "groupby": ["device_category"],
+        "metric": count_metric("request_id"),
+        "adhoc_filters": [],
+        "row_limit": 10,
+        "sort_by_metric": True,
+        "color_scheme": "supersetColors",
+        "show_labels": True,
+        "show_legend": True
+    })
+
+    # Test vs production traffic chart
+    create_chart(session, "Test vs Production Traffic", "pie", ds_enriched, {
+        "viz_type": "pie",
+        "groupby": ["is_test_traffic"],
+        "metric": count_metric("request_id"),
+        "adhoc_filters": [],
+        "row_limit": 10,
+        "sort_by_metric": True,
+        "color_scheme": "supersetColors",
+        "show_labels": True,
+        "show_legend": True
+    })
+
+    # Hourly aggregation chart
+    create_chart(session, "Hourly Revenue by Bidder", "pie", ds_hourly_geo, {
+        "viz_type": "pie",
+        "groupby": ["device_geo_country"],
+        "metric": sum_metric("total_revenue", "Total Revenue"),
+        "adhoc_filters": [],
+        "row_limit": 20,
+        "sort_by_metric": True,
+        "color_scheme": "supersetColors",
+        "show_labels": True,
+        "show_legend": True
+    })
+
+    # Rolling metrics chart
+    rolling_chart_id = create_chart(session, "Rolling Win Count by Bidder", "echarts_timeseries_bar", ds_rolling_bidder, {
+        "viz_type": "echarts_timeseries_bar",
+        "x_axis": "bidder_id",
+        "metrics": [sum_metric("win_count", "Win Count"), sum_metric("revenue", "Revenue")],
+        "groupby": [],
+        "adhoc_filters": [],
+        "row_limit": 10,
+        "order_desc": True,
+        "x_axis_sort": "Win Count",
+        "x_axis_sort_asc": False,
+        "color_scheme": "supersetColors",
+        "show_legend": True
+    })
+
+    print("Charts setup complete")
+
+    # Dashboard with auto-refresh (15 seconds) -- uses ORM because the REST
+    # API does not establish the dashboard-slices relationship.
+    create_dashboard_orm("AdTech Data Lake", "adtech-data-lake",
+                         rolling_chart_id, refresh_frequency=15)
 
     print("Setup complete")
 
