@@ -19,6 +19,22 @@
         "CLICK_RATE": "0.02"
       },
       "console": "integratedTerminal"
+    },
+    {
+      "name": "Superset Setup Dashboards (Remote)",
+      "type": "debugpy",
+      "request": "attach",
+      "connect": {
+        "host": "localhost",
+        "port": 5678
+      },
+      "pathMappings": [
+        {
+          "localRoot": "${workspaceFolder}/superset",
+          "remoteRoot": "/app"
+        }
+      ],
+      "preLaunchTask": "superset-debug-script"
     }
   ]
 }

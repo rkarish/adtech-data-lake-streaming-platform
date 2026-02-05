@@ -11,9 +11,17 @@ Creates:
 All operations are idempotent -- existing resources are skipped.
 """
 
+import os
 import sys
 import json
 import requests
+
+if os.environ.get("ENABLE_DEBUGGER") == "true":
+    import debugpy
+    debugpy.listen(("0.0.0.0", 5678))
+    print("Waiting for debugger to attach on port 5678...")
+    debugpy.wait_for_client()
+    print("Debugger attached!")
 
 SUPERSET_URL = "http://localhost:8088"
 

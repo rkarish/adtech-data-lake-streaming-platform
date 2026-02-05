@@ -10,7 +10,12 @@ See [`.design/adtech-data-lake-streaming-platform.md`](.design/adtech-data-lake-
 Mock Data Gen  --->  Kafka (KRaft)
                          |
                          v
-                   Flink (SQL Job)
+      +---------------------------------------+
+      |                Flink                  |
+      |  Core Funnel &       Streaming        |
+      |  Enrichment Job      Aggregation Job  |
+      +---------------------------------------+
+                         |
                          |
               +----------+----------+
               |                     |
@@ -261,19 +266,23 @@ The workspace is persisted in a Docker volume (`cloudbeaver-workspace`), so subs
 Open [http://localhost:8088](http://localhost:8088) and log in with `admin` / `password`. The setup script creates:
 
 - A Trino database connection
-- Datasets for all 4 tables (`bid_requests`, `bid_responses`, `impressions`, `clicks`)
+- Datasets for all 7 tables (core funnel + enriched + aggregations)
 - Charts (visible under Charts):
   - "Bid Requests by Country" -- pie chart of request volume by geo
   - "Bid Responses by Bidder Seat" -- pie chart of responses per bidder
   - "Impressions by Bidder" -- pie chart of win counts per bidder
   - "Clicks by Creative" -- pie chart of click counts per creative
+  - "Requests by Device Category" -- pie chart from enriched data (Desktop, Mobile Web, Mobile App, CTV)
+  - "Test vs Production Traffic" -- pie chart of test/production split from enriched data
+  - "Hourly Revenue by Bidder" -- pie chart of total revenue by country from hourly aggregations
+  - "Rolling Win Count by Bidder" -- bar chart of win count and revenue from 5-minute rolling windows
+- An "AdTech Data Lake Test" dashboard with auto-refresh (15s)
 
 You can also use SQL Lab to run ad-hoc queries against Trino.
 
-To redeploy `setup-dashboards.py` after making changes, restart the container to sync the bind-mounted file and re-run the script:
+To re-run `setup-dashboards.py` after making changes (the script is bind-mounted, so local edits are reflected immediately):
 
 ```bash
-docker restart superset
 docker exec superset python /app/setup-dashboards.py
 ```
 
@@ -323,6 +332,23 @@ bash scripts/setup-generator-local-debug.sh
 ### 4. Run/debug with VS Code
 
 Use the **"Mock Data Generator"** launch configuration (in `.vscode/launch.json`) to run or debug the generator. It points at `localhost:29092` and includes all funnel rate environment variables. Set breakpoints in `mock-data-gen/src/` and press F5.
+
+### Debugging `setup-dashboards.py` (Superset)
+
+The `setup-dashboards.py` script runs inside the Superset container but can be debugged from VS Code using remote attach. The script, along with `superset_config.py` and `bootstrap.sh`, is bind-mounted into the container via `docker-compose.yml`, so local edits are reflected immediately without rebuilding.
+
+1. Make sure the Superset container is running:
+
+```bash
+docker compose up superset -d
+```
+
+2. Use the **"Superset Setup Dashboards (Remote)"** launch configuration and press F5. This automatically:
+   - Runs the script inside the container with `debugpy` enabled (via the `superset-debug-script` preLaunchTask)
+   - Waits for the debug server to start listening on port 5678
+   - Attaches the VS Code debugger with path mappings from `superset/` to `/app`
+
+3. Set breakpoints in `superset/setup-dashboards.py` and step through the code as usual.
 
 ### 5. Verify the Flink pipeline
 

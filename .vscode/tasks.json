@@ -1,0 +1,26 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "superset-debug-script",
+            "type": "shell",
+            "command": "docker exec -e ENABLE_DEBUGGER=true -e PYTHONUNBUFFERED=1 superset python /app/setup-dashboards.py",
+            "isBackground": true,
+            "presentation": {
+                "reveal": "always",
+                "panel": "shared"
+            },
+            "problemMatcher": {
+                "owner": "custom",
+                "pattern": {
+                    "regexp": "^NEVER_MATCH$"
+                },
+                "background": {
+                    "activeOnStart": true,
+                    "beginsPattern": "^.$",
+                    "endsPattern": "^.*Waiting for debugger.*$"
+                }
+            }
+        }
+    ]
+}
