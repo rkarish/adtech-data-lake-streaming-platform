@@ -54,6 +54,7 @@ Mock Data Gen  --->  Kafka (KRaft)
 
 - Docker and Docker Compose
 - Python 3.12+ (for local development only)
+  - On Ubuntu/Debian, also install `python3-venv`: `sudo apt install python3-venv`
 - `curl` (for setup script)
 - [Claude Code](https://claude.com/claude-code) with the `voltagent-data-ai` subagent (for AI-assisted development)
 

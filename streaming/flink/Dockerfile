@@ -16,6 +16,10 @@ RUN wget -q -P /opt/flink/lib/ \
 RUN wget -q -P /opt/flink/lib/ \
     https://repo1.maven.org/maven2/org/apache/flink/flink-sql-connector-kafka/3.3.0-1.20/flink-sql-connector-kafka-3.3.0-1.20.jar
 
+# Download Flink SQL Avro Confluent format JAR (Avro + Schema Registry client)
+RUN wget -q -P /opt/flink/lib/ \
+    https://repo1.maven.org/maven2/org/apache/flink/flink-sql-avro-confluent/1.20.1/flink-sql-avro-confluent-1.20.1.jar
+
 # Enable S3 filesystem plugin for checkpoint storage on MinIO
 RUN mkdir -p /opt/flink/plugins/s3-fs-hadoop && \
     cp /opt/flink/opt/flink-s3-fs-hadoop-*.jar /opt/flink/plugins/s3-fs-hadoop/
